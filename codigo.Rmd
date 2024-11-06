@@ -1,0 +1,319 @@
+---
+title: "PEC 1"
+output:
+  word_document: default
+  html_document: default
+  pdf_document: default
+---
+
+# *1. Seleccionar un dataset de metabolómica*
+
+En mi caso, he seleccionado y descargado el dataset Cachexia procedente de https://github.com/nutrimetabolomics/metaboData/. Para trabajar con estos datos en R, cargamos el archivo "human_cachexia.csv" que tiene los datos con los que trabajaremos.
+
+```{r}
+# Indicar la ruta del archivo
+ruta_archivo <- "D:/Máster bioinformática/Análisis de datos ómicos/PEC1/human_cachexia.csv"
+
+# Cargar el archivo
+cachexia <- read.csv(ruta_archivo)
+
+```
+
+
+# *2. Crear un contenedor del tipo SummarizedExperiment*
+
+Para crear el contenedor, primero comprobaremos las columnas o variables de nuestro dataset, con el fin de identificar cuales corresponden a datos y cuales a metadatos, y así poder asignarlos adecuadamente.
+
+```{r}
+# Obtener el nombre de las columnas
+colnames(cachexia)
+```
+
+Podemos observar que las dos primeras columnas corresponden a metadatos: Patient.ID (es el identificador de cada individuo) y Muscle.loss (indica a qué grupo pertenece cada individuo). El resto de columnas son variables que corresponden a metabolitos.
+
+Teniendo esto en cuenta podremos crear nuestro contenedor SummarizedExperiment
+
+```{r}
+# Cargar la biblioteca SummarizedExperiment
+library(SummarizedExperiment)
+
+# Definir los metadatos ("Patient.ID" y "Muscle.loss") como las columnas
+metadatos_cachexia <- cachexia[, 1:2]
+colnames(metadatos_cachexia) <- c("Patient.ID", "Muscle.loss")  
+
+# Definir los datos de expresión (columnas correspondientes a los metabolitos)
+datos_expresion <- as.matrix(cachexia[, 3:ncol(cachexia)])
+datos_expresion <- t(datos_expresion) 
+
+# Crear un data frame para indicar en rowData que las variables corresponden a metabolitos
+row_data <- data.frame(Metabolitos = rownames(datos_expresion))
+
+# Crear el objeto SummarizedExperiment
+contenedor_cachexia <- SummarizedExperiment(
+  assays = list(counts = datos_expresion),
+  colData = metadatos_cachexia,
+  rowData = row_data
+)
+
+# Visualizar el objeto SummarizedExperiment que hemos creado
+contenedor_cachexia
+
+```
+
+
+
+
+# *3. Exploración del dataset*
+
+## *Análisis directo del dataset*
+
+En primer lugar, podemos visualizar directamente el tamaño y estructura del dataset, así como obtener un resumen estadístico para cada variable.
+
+```{r}
+# Mostrar las dimensiones del dataset
+dim(cachexia)
+
+# Mostrar los nombres de las columnas
+colnames(cachexia)
+
+# Mostrar los tipos de datos que tiene cada variable
+str(cachexia)
+
+```
+Podemos observar que tenemos 77 muestras con 65 variables, siendo todas numéricas excepto Patient.ID y Muscle.loss, las cuales son de tipo character.
+
+También podemos visualizar las primeras filas del dataset y obtener un resumen estadístico.
+```{r}
+# Mostrar las primeras filas 
+head(cachexia)
+
+# Obtener un resumen estadístico de las columnas
+summary(cachexia)
+```
+
+
+Comprobaremos si hay algún valor faltante.
+```{r}
+# Verificar si hay filas o columnas con NA
+anyNA(cachexia)
+
+```
+Observamos que en nuestro caso no hay ninguno.
+
+
+## *Análisis utilizando el objeto SummarizedExperiment*
+
+La información básica que ya hemos comprobado como las dimensiones o estructura del dataset también puede comprobarse a través del contenedor SummarizedExperiment que hemos creado.
+```{r}
+# Mostrar la estructura del contenedor
+contenedor_cachexia
+
+# Visualizar los nombres de los metabolitos
+rowData(contenedor_cachexia)
+
+# Verificar si existen valores faltantes en el objeto `contenedor_cachexia`
+anyNA(contenedor_cachexia)
+
+# Visualizar los primeros datos de expresión
+assay(contenedor_cachexia)[1:10, 1:10]  
+
+# Mostrar los metadatos
+colData(contenedor_cachexia)
+
+# Obtener el resumen estadístico de los datos de expresión
+summary(datos_expresion)
+
+```
+
+## *Análisis en mayor profundidad*
+
+*Normalizar los datos*
+
+Podemos utilizar el paquete POMA para imputar, normalizar y analizar nuestro objeto SummarizedExperiment.
+
+```{r}
+# Instalar y cargar el paquete POMA a través de BiocManager
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("POMA")
+
+library(POMA)
+
+```
+
+Como ya hemos comprobado que en nuestro conjunto de datos no hay ningún valor faltante no sería necesario imputar y podemos pasar directamente a la normalización.
+
+```{r}
+# Normalizar los datos
+contenedor_cachexia_normalizado <- contenedor_cachexia %>%
+  PomaNorm(method = "log_pareto")
+
+contenedor_cachexia_normalizado
+
+```
+
+Para visualizar si hay diferencias podemos representar gráficamente los datos antes y después de la normalización.
+
+```{r}
+# Datos antes de normalizar
+PomaBoxplots(contenedor_cachexia, x = "samples") 
+```
+
+```{r}
+# Datos después de normalizar
+PomaBoxplots(contenedor_cachexia_normalizado, x = "samples") 
+```
+Observamos que hemos normalizando correctamente, consiguiendo que los datos sigan una estructura más homogénea.
+
+
+*Determinar el número de individuos por grupo*
+
+La variable 'Muscle.loss' clasifica a los individuos en dos grupos (cachexic y control), por lo que resultaría interesante saber cuantos individuos pertenecen a grupo.
+
+```{r}
+# Calcular el número de individuos pertenecientes a cada grupo (cachexic y control)
+muscle_loss <- colData(contenedor_cachexia)$Muscle.loss
+conteo_grupos <- table(muscle_loss)
+print(conteo_grupos)
+
+# Representar en un gráfico de barras el número de individuos de cada grupo
+barplot(conteo_grupos, 
+        main="Número de individuos por grupo en Muscle.loss",
+        xlab="Grupo",
+        ylab="Número de individuos",
+        col=c("lightgreen", "lightblue"),
+        names.arg=c("Cachexic", "Control"))
+
+```
+Hemos obtenido que hay 47 individuos con cachexia y 30 individuos pertenecientes al grupo de control.
+
+
+
+*Análisis de expresión diferencial*
+
+Para determinar en qué variables hay diferencias significativas entre los grupos, podemos llevar a cabo un análisis de expresión diferencial.
+```{r}
+# Instalar y cargar el paquete limma a través de BiocManager
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("limma")
+
+library(limma)
+
+# Confirmar que Muscle.loss es un factor
+colData(contenedor_cachexia_normalizado)$Muscle.loss <- factor(colData(contenedor_cachexia_normalizado)$Muscle.loss, levels = c("control", "cachexic"))
+
+# Generar la matriz de diseño para limma
+matriz_diseño <- model.matrix(~ Muscle.loss, data = colData(contenedor_cachexia_normalizado))
+
+# Realizar el análisis de expresión diferencial y guardar los resultados
+ajuste_modelo <- lmFit(assay(contenedor_cachexia_normalizado), matriz_diseño)
+ajuste_modelo <- eBayes(ajuste_modelo)
+resultados_limma <- topTable(ajuste_modelo, coef = "Muscle.losscachexic", number = Inf)
+
+```
+
+Luego, filtraremos mostrando solo los metabolistos que resultaron significativos (P-value < 0.05).
+```{r}
+# Filtrar los metabolitos significativos (P-value < 0.05)
+metabolitos_significativos <- resultados_limma[resultados_limma$adj.P.Val < 0.05, ]
+print(metabolitos_significativos)
+
+```
+Hemos obtenido que para 54 de los 63 metabolitos hay diferencias significativas entre los grupos.
+
+Podemos visualizar gráficamente los resultados de expresión diferencial, por ejemplo mediante un volcano plot.
+```{r}
+# Instalar y cargar el paquete EnhancedVolcano a través de BiocManager
+if (!require("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+
+BiocManager::install("EnhancedVolcano")
+
+library(EnhancedVolcano)
+
+# Generar el gráfico
+EnhancedVolcano(
+  resultados_limma,
+  lab = rownames(resultados_limma),
+  x = 'logFC',
+  y = 'adj.P.Val',
+  title = 'Análisis de Expresión Diferencial',
+  pCutoff = 0.05,
+  FCcutoff = 1
+)
+
+```
+En el volcano plot se resaltan los metabloitos estadísticamente significativos, los cuales corresponden a los que superan la línea del umbra. En este caso están coloreados de azul. Cuanto más a la derecha se encuentren, más se están expresando los metabolitos.
+
+También podemos representar algunas variables de manera independiente. Por ejemplo, representaremos 4 que han resultado significativas en el anterior análisis (Alanine, Creatine, Taurine y Glutamine) y 2 que no (Isoleucine y Acetone).
+
+```{r}
+# Seleccionar los metabolitos que vamos a representar
+metabolitos_seleccionados <- c("Alanine", "Creatine", "Taurine", "Glutamine", "Isoleucine", "Acetone") 
+
+# Crear los boxplot
+par(mfrow=c(1, 3))
+for (metabolito in metabolitos_seleccionados[1:6]) {
+  boxplot(datos_expresion[metabolito, ] ~ muscle_loss,
+          main=paste(metabolito),
+          ylab=metabolito,
+          col=c("lightblue", "lightcoral"))
+}
+par(mfrow=c(1, 2))
+
+```
+
+
+*PCA*
+
+Podemos realizar un análisis de componentes principales (PCA) para observar si los componentes encajan con nuestros grupos de individuos (cachexic y control).
+```{r}
+# Instalar y cargar el paquete PCAtools a través de BiocManager
+if (!require("PCAtools", quietly = TRUE))
+    BiocManager::install("PCAtools")
+
+library(PCAtools)
+
+# Realizar el PCA
+pca <- pca(assay(contenedor_cachexia_normalizado), metadata = colData(contenedor_cachexia_normalizado), removeVar = 0.1)
+biplot(pca, colby = "Muscle.loss", legendPosition = "right")
+
+```
+
+
+*Mapa de calor*
+
+Por ultimo, llevar a cabo un mapa de calor permite visualizar si existen patrones de expresión entre las muestras.
+
+```{r}
+# Instalar y cargar el paquete ComplexHeatmap a través de BiocManager
+if (!require("ComplexHeatmap", quietly = TRUE))
+    BiocManager::install("ComplexHeatmap")
+
+library(ComplexHeatmap)
+
+# Crear el mapa de calor
+Heatmap(
+  assay(contenedor_cachexia_normalizado),
+  name = "Expression",
+  column_title = "Samples",
+  row_title = "Metabolites",
+  cluster_rows = TRUE,
+  cluster_columns = TRUE,
+  show_column_names = FALSE,
+  top_annotation = HeatmapAnnotation(df = data.frame(Group = colData(contenedor_cachexia)$Muscle.loss))
+)
+
+```
+Podemos observar que la mayoría de individuos del grupo control se sitúan a la derecha y tienen niveles niveles de expresión más bajos que los individuos con cachexia, los cuales se concentran a la izquierda del gráfico.
+
+
+# *4. Reposición de los datos en github*
+
+Por último, creamos un repositorio de github donde se adjuntaran todos los entregables de esta PEC. En mi caso, corresponde al siguiente enlace: https://github.com/DanielAcostaBarrios/Acosta-Barrios-Daniel-PEC1
+
+
+
